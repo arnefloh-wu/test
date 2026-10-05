@@ -1,4 +1,6 @@
+import io
 import json
+import re
 
 import pytest
 
@@ -165,3 +167,106 @@ def test_cli_writes_csv(tmp_path, monkeypatch):
     assert main(["--api-key", "k", "search", "TS=x", "-o", str(out)]) == 0
     lines = out.read_text().splitlines()
     assert lines[0].startswith("uid,doi,title") and len(lines) == 3
+
+
+# ------------------------------------------------------------ WoS plain text
+
+from wos_client.export import format_cited_ref, format_record, write_wos_plaintext  # noqa: E402
+
+
+def make_full_rec(i=1):
+    rec = make_rec(i)
+    full = rec["static_data"]["fullrecord_metadata"]
+    summary = rec["static_data"]["summary"]
+    summary["pub_info"]["pubtype"] = "Journal"
+    summary["pub_info"]["pubmonth"] = "APR"
+    summary["titles"]["title"].append({"type": "abbrev_29", "content": "J INT BUS STUD"})
+    for n in summary["names"]["name"]:
+        n["full_name"] = {"Smith, A": "Smith, Alice", "Doe, J": "Doe, John"}.get(n["wos_standard"])
+        n["addr_no"] = "1"
+    full["languages"] = {"language": {"type": "primary", "content": "English"}}
+    full["addresses"] = {"address_name": [
+        {"address_spec": {"addr_no": 1, "full_address": "Vienna Univ Econ & Business, Vienna, Austria",
+                          "country": "Austria"},
+         "names": {"name": [{"full_name": "Smith, Alice"}, {"full_name": "Doe, John"}]}},
+        {"address_spec": {"addr_no": 2, "full_address": "Univ Leeds, Leeds, England"}},  # no names
+    ]}
+    full["reprint_addresses"] = {"address_name": {
+        "address_spec": {"full_address": "Vienna Univ Econ & Business, Vienna, Austria."},
+        "names": {"name": {"wos_standard": "Smith, A"}}}}
+    full["refs"] = {"count": 2}
+    full["references"] = {"count": 2, "reference": [
+        {"uid": "WOS:A1977DH95600002", "citedAuthor": "Johanson, J", "year": "1977",
+         "citedWork": "J INT BUS STUD", "volume": "8", "page": "23",
+         "doi": "10.1057/palgrave.jibs.8490676"},
+        {"citedWork": "WORLD INVESTMENT REP", "year": "2020"},
+    ]}
+    return rec
+
+
+def test_format_cited_ref_both_shapes():
+    assert format_cited_ref({"citedAuthor": "Johanson, J", "year": "1977", "citedWork": "J INT BUS STUD",
+                             "volume": "8", "page": "23", "doi": "10.1057/x"}) \
+        == "Johanson J, 1977, J INT BUS STUD, V8, P23, DOI 10.1057/x"
+    # /references endpoint uses capitalised keys
+    assert format_cited_ref({"CitedAuthor": "Hymer, S", "Year": "1976", "CitedWork": "INT OPERATIONS NATL"}) \
+        == "Hymer S, 1976, INT OPERATIONS NATL"
+    assert format_cited_ref({"year": "2020", "citedWork": "X"}) == "[Anonymous], 2020, X"
+
+
+def test_format_record_tags_and_continuations():
+    text = format_record(make_full_rec())
+    lines = text.splitlines()
+    assert lines[0] == "PT J" and lines[-1] == "ER"
+    assert "AU Smith, A\n   Doe, J\nAF Smith, Alice\n   Doe, John" in text
+    assert "C1 [Smith, Alice; Doe, John] Vienna Univ Econ & Business, Vienna, Austria.\n" \
+           "   Univ Leeds, Leeds, England." in text
+    assert "RP Smith, A (corresponding author), Vienna Univ Econ & Business, Vienna, Austria." in lines
+    assert "CR Johanson J, 1977, J INT BUS STUD, V8, P23, DOI 10.1057/palgrave.jibs.8490676\n" \
+           "   [Anonymous], 2020, WORLD INVESTMENT REP" in text
+    for expected in ["LA English", "DT Article", "DE internationalization; SMEs", "TC 42", "NR 2",
+                     "J9 J INT BUS STUD", "PD APR", "PY 2020", "BP 10", "EP 30", "DI 10.1057/1",
+                     "WC Business; Management", "SC Business & Economics", "UT WOS:000000000000001"]:
+        assert expected in lines
+    # every line is a tag line or a continuation, so the format cannot be broken by newlines
+    assert all(re.match(r"^([A-Z][A-Z0-9] |   |ER$)", line) for line in lines)
+
+
+def test_newlines_in_values_are_collapsed():
+    rec = make_full_rec()
+    rec["static_data"]["fullrecord_metadata"]["abstracts"]["abstract"]["abstract_text"]["p"] = ["a\nb", "c"]
+    assert "AB a b c" in format_record(rec).splitlines()
+
+
+def test_write_file_and_fetch_missing_references():
+    rec = make_full_rec()
+    rec["static_data"]["fullrecord_metadata"]["refs"]["count"] = 3  # embedded list is incomplete
+    fetched = []
+
+    def fetch(uid):
+        fetched.append(uid)
+        return [{"CitedAuthor": "A, B", "Year": "2000"}] * 3
+
+    out = io.StringIO()
+    assert write_wos_plaintext([rec, make_rec(2)], out, fetch_references=fetch) == 2
+    text = out.getvalue()
+    assert text.startswith("﻿FN Clarivate Analytics Web of Science\nVR 1.0\n")
+    assert text.endswith("ER\n\nEF\n") and text.count("\nER\n") == 2
+    # both records report more references than they embed (make_rec has 85, none embedded)
+    assert fetched == ["WOS:000000000000001", "WOS:000000000000002"]
+    assert text.count("A B, 2000") == 6
+    # a complete embedded list costs no request
+    fetched.clear()
+    write_wos_plaintext([make_full_rec()], io.StringIO(), fetch_references=fetch)
+    assert fetched == []
+
+
+def test_cli_txt_and_convert(tmp_path, monkeypatch):
+    s = FakeSession([FakeResponse(200, page([make_full_rec(1), make_full_rec(2)], 2))])
+    monkeypatch.setattr("requests.Session", lambda: s)
+    raw = tmp_path / "raw.jsonl"
+    assert main(["--api-key", "k", "search", "TS=x", "-o", str(raw), "--raw"]) == 0
+    out = tmp_path / "savedrecs.txt"
+    assert main(["convert", str(raw), "-o", str(out)]) == 0  # no API key or request needed
+    text = out.read_text(encoding="utf-8-sig")
+    assert text.count("\nPT J\n") == 2 and "CR Johanson J, 1977" in text

@@ -26,6 +26,47 @@ wos search 'TS=("psychic distance" OR "cultural distance") AND PY=2000-2025' \
 wos search 'SO=("JOURNAL OF INTERNATIONAL BUSINESS STUDIES") AND PY=2024' -o jibs2024.jsonl --raw
 ```
 
+## VOSviewer and Bibliometrix
+
+An output file ending in `.txt` (or `-f wos`) is written in the Web of Science
+**plain-text "Full record and cited references"** export format, the same
+`savedrecs.txt` you would download from the WoS website:
+
+```bash
+wos search 'TS=("psychic distance") AND PY=2000-2025' --edition WOS+SSCI -o savedrecs.txt
+
+# Already have raw records? Convert them without using any API quota:
+wos convert jibs2024.jsonl -o savedrecs.txt
+```
+
+* **VOSviewer:** Create map → *Create a map based on bibliographic data* →
+  *Read data from bibliographic database files* → *Web of Science*, then pick
+  the file. Co-authorship, co-occurrence, citation, bibliographic coupling and
+  co-citation maps all work.
+* **Bibliometrix / biblioshiny:**
+  ```r
+  library(bibliometrix)
+  M <- convert2df("savedrecs.txt", dbsource = "wos", format = "plaintext")
+  results <- biblioAnalysis(M)
+  ```
+
+Fields written: `PT AU AF TI SO LA DT DE ID AB C1 RP CR NR TC Z9 SN EI J9 JI
+PD PY VL IS BP EP AR DI WC SC UT`. Cited references (`CR`) use the WoS form
+`Johanson J, 1977, J INT BUS STUD, V8, P23, DOI 10.1057/...`, which drives
+co-citation, bibliographic coupling and local citation analyses.
+
+Notes:
+
+* **Cited references:** if a full record embeds fewer references than its
+  reference count, `--fetch-references` fills `CR` from the `/references`
+  endpoint. This costs one extra request per affected record.
+* **`Z9` (times cited, all databases):** the API's Core Collection count is
+  used here, the same value as `TC`.
+* **Testing:** the format was checked against bibliometrix's own
+  `convert2df` (AU_UN, AU_CO, AU1_CO, CR_SO, `biblioAnalysis` and
+  `localCitations` all came out correctly) and the independent `wosfile`
+  parser. VOSviewer reads this standard format, but it was not run in testing.
+
 ## Python
 
 ```python
@@ -45,6 +86,11 @@ uid = df.sort_values("times_cited", ascending=False).uid.iloc[0]
 citing = to_dataframe(wos.citing(uid, max_records=500))
 refs = list(wos.references(uid))                              # its cited references
 print(wos.records_remaining, "records left in this year's quota")
+
+# WoS plain-text export for VOSviewer / Bibliometrix
+from wos_client import write_wos_plaintext
+with open("savedrecs.txt", "w", encoding="utf-8") as f:
+    write_wos_plaintext(records, f, fetch_references=wos.references)
 ```
 
 ### Flattened columns
