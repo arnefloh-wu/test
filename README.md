@@ -12,6 +12,14 @@ pip install -e ".[pandas]"
 export WOS_API_KEY=...   # from developer.clarivate.com (your institution's Expanded API key)
 ```
 
+The client calls `https://api.clarivate.com/api/wos`, the base URL the Clarivate
+developer portal shows. To use another one (e.g. the older
+`https://wos-api.clarivate.com/api/wos`), set `WOS_API_URL` or pass `--base-url`.
+
+When registering the application on the portal, any redirect URL (e.g.
+`http://localhost`) will do: the Expanded API authenticates with the
+`X-ApiKey` header, not an OAuth redirect.
+
 ## Command line
 
 ```bash

@@ -270,3 +270,13 @@ def test_cli_txt_and_convert(tmp_path, monkeypatch):
     assert main(["convert", str(raw), "-o", str(out)]) == 0  # no API key or request needed
     text = out.read_text(encoding="utf-8-sig")
     assert text.count("\nPT J\n") == 2 and "CR Johanson J, 1977" in text
+
+
+def test_base_url_default_env_and_override(monkeypatch):
+    monkeypatch.delenv("WOS_API_URL", raising=False)
+    c, s = client([FakeResponse(200, page([], 0))])
+    c.count("TS=x")
+    assert s.calls[0][0] == "https://api.clarivate.com/api/wos/"
+    monkeypatch.setenv("WOS_API_URL", "https://wos-api.clarivate.com/api/wos/")
+    assert WosClient("k").base_url == "https://wos-api.clarivate.com/api/wos"
+    assert WosClient("k", base_url="https://x/api/wos").base_url == "https://x/api/wos"

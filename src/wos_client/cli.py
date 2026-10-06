@@ -18,6 +18,8 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="wos", description="Web of Science Expanded API client")
     p.add_argument("--api-key", help="defaults to $WOS_API_KEY")
     p.add_argument("--database", default="WOS", help="databaseId (default: WOS core collection)")
+    p.add_argument("--base-url", help="API base URL; defaults to $WOS_API_URL or "
+                                      "https://api.clarivate.com/api/wos")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("search", help="run an advanced-search query and export records")
@@ -47,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"wrote {n} records", file=sys.stderr)
             return 0
 
-        client = WosClient(args.api_key, database=args.database)
+        client = WosClient(args.api_key, database=args.database, base_url=args.base_url)
         if args.cmd == "count":
             print(client.count(args.query, edition=args.edition))
             return 0

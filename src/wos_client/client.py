@@ -11,7 +11,9 @@ from typing import Any, Iterator
 
 import requests
 
-BASE_URL = "https://wos-api.clarivate.com/api/wos"
+# Base URL shown in the Clarivate developer portal. The older host
+# https://wos-api.clarivate.com/api/wos serves the same API.
+BASE_URL = "https://api.clarivate.com/api/wos"
 MAX_PAGE_SIZE = 100  # hard limit of the Expanded API per request
 
 
@@ -36,7 +38,7 @@ class WosClient:
         api_key: str | None = None,
         *,
         database: str = "WOS",
-        base_url: str = BASE_URL,
+        base_url: str | None = None,
         requests_per_second: float = 2.0,
         max_retries: int = 5,
         timeout: float = 60.0,
@@ -46,7 +48,7 @@ class WosClient:
         if not self.api_key:
             raise ValueError("No API key: pass api_key or set WOS_API_KEY.")
         self.database = database
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or os.environ.get("WOS_API_URL") or BASE_URL).rstrip("/")
         self.min_interval = 1.0 / requests_per_second if requests_per_second else 0.0
         self.max_retries = max_retries
         self.timeout = timeout
